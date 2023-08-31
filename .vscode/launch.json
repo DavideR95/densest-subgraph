@@ -1,0 +1,18 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "C/C++: make build and debug active file",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "/Users/Davide/Documents/Dottorato/denmark/main",
+            "args": ["2.001", "650", "prova3.txt"],
+            "stopAtEntry": false,
+            "cwd": "${fileDirname}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb",
+            "preLaunchTask": "C/C++: g++ build active file"
+        }
+    ]
+}
