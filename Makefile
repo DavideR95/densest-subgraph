@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := main
 
-CXX = g++
+CXX = icpx
 CXXFLAGS = -Wall -pedantic -std=c++17 -g -O3
 LDFLAGS =
 

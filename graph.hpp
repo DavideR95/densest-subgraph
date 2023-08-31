@@ -3,6 +3,8 @@
 #include <list>
 #include <numeric>
 #include <math.h>
+#include <algorithm>
+#include <limits.h>
 
 using node_t = uint32_t;
 
