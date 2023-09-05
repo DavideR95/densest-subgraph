@@ -30,12 +30,16 @@ int main(int argc, char* argv[]) {
         node_t u, v;
 
         file >> u >> v;
-        std::cout << "Leggo " << u << ", " << v << std::endl;
+        std::cout << "Leggo " << u << ", " << v << " ";
 
         g.add_undirected_edge(u, v);
-        g.update_densest_subgraph();
+        std::cout << "Nuova max dens: " << (double) g.delta().second / b << " (nodo: " << g.delta().first << ")" << std::endl;
+        // Forse si può riutilizzare il codice di costruzione per lo heap......
+        // E poi però cosa ci sta nelle foglie? Pensiamoci oggi....
     }
     
+    g.update_densest_subgraph();
+
     std::cout << "Grafo risultante: " << std::endl;
 
     //g.print_all();

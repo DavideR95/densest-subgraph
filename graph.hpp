@@ -4,7 +4,9 @@
 #include <numeric>
 #include <math.h>
 #include <algorithm>
+#include <unordered_set>
 #include <limits.h>
+#include <cassert>
 
 using node_t = uint32_t;
 
@@ -21,20 +23,58 @@ struct bucket_t {
     bucket_t(std::list<node_t> n, size_t deg) : neighs(n), degree(deg) {}
 };
 
+struct parent_node_t { 
+    size_t node_count; // How many vertices have degree at least T_i
+    size_t first_leaf; // Pointer to first leaf
+
+    parent_node_t() : node_count(0), first_leaf(0) {
+
+    }
+
+};
+
+struct leaf_node_t {
+    std::unordered_set<node_t> node_list; // For leaves only
+    size_t degree; // For leaves only
+    
+    leaf_node_t(size_t deg) : node_list({}), degree(deg) {}
+};
+
+class tree_t {
+    private:
+        std::vector<parent_node_t> internal_nodes;
+        std::vector<leaf_node_t> leaves;
+        std::vector<size_t> reverse_index;
+    public:
+
+        tree_t(size_t sz) : internal_nodes(sz-1), leaves(sz, 0), reverse_index(sz, 0) {
+            leaves[0].degree = 0;
+            for(node_t v=0;v<sz;v++) leaves[0].node_list.insert(v); // All nodes start with outdegree = 0
+        }
+
+        void update_node(node_t who, size_t count=1) {
+            size_t bucket = reverse_index[who]; // Move who to the +count bucket
+            leaves[bucket].node_list.erase(who);
+            assert(bucket+count >= 0);
+            leaves[bucket+count].node_list.insert(who);
+            reverse_index[who] = bucket+count;
+        }
+};
+
 class Graph {
     private:
         size_t N; // Number of vertices
         unsigned int b; // Edge duplication parameter
         double eta;
         // Will represent d+(u) sorted by the multiplicity of the (outward) edges
-        std::vector<std::vector<node_t>> outward_neighs;
+        std::vector<std::vector<std::pair<node_t, size_t>>> outward_neighs;
         std::vector<size_t> d_pluses;
         // d+(v) = adjlist[v].size()
         // Vector of doubly linked lists for N-(u)
         std::vector<std::list<bucket_t>> inward_neighs;
         size_t maximal_outdegree = 0;
         node_t maximal_node = 0;
-
+        tree_t vertex_tree;
         size_t edge_count;
 
         bool is_isolated(node_t v) {
@@ -75,14 +115,19 @@ class Graph {
             // Assumption: d_plus(v) has already been updated
             auto d_plus_v = d_plus(v);
 
+            unsigned short checks = 0;
+
             for(auto& bkt : inward_neighs[who]) {
                 if(bkt.id() == d_plus_v - count) { // Old d+(u)
                     bkt.neighs.remove(v);
+                    checks++;
                 }
                 else if(bkt.id() == d_plus_v) {
                     bkt.neighs.push_back(v);
                     inserted = true;
+                    checks++;
                 }
+                if(checks >= 2) return;
             }
 
             if(!inserted) {
@@ -105,14 +150,15 @@ class Graph {
 
         // Adds the edge (u, v)
         void append_edge(node_t u, node_t v) {
-            /*for(auto& neigh : outward_neighs[u]) {
+            for(auto& neigh : outward_neighs[u]) {
                 if(neigh.first == v) {
                     neigh.second++;
                     return;
                 }
             }
-            outward_neighs[u].push_back(std::make_pair(v, 1));*/
-            outward_neighs[u].push_back(v);
+            outward_neighs[u].push_back(std::make_pair(v, 1));
+            vertex_tree.update_node(u); // Adds +1 to the outdegree of 1
+            //outward_neighs[u].push_back(v);
             //std::sort(outward_neighs[u].begin(), outward_neighs[u].end());
         }
 
@@ -122,19 +168,21 @@ class Graph {
            // auto old_d_plus_u = d_plus(u);
             for(auto it=outward_neighs[u].begin();it<outward_neighs[u].end();it++) {
                 auto& neigh = *it;
-                if(neigh == v) {
+                /*if(neigh == v) {
                     outward_neighs[u].erase(it);
                     //if(d_pluses[u] > 0) d_pluses[u]--;
                     break;
-                }
-                /* if(neigh.first == v) {
+                } */
+                if(neigh.first == v) {
                     // QUI SE È GIA ZERO CI SONO PROBLEMI
-                    neigh.second--; // Decrease the degree by one 
-                    if(neigh.second == 0) { // If it is zero now remove the pair entirely
+                    if(neigh.second == 1) { // If it is zero now remove the pair entirely
                         outward_neighs[u].erase(it);
                     }
+                    else {
+                        neigh.second--; // Decrease the degree by one 
+                    }
                     break;
-                }*/
+                }
             }
             /*bool inserted = false;
             for(auto& bkt : inward_neighs[v]) {
@@ -160,6 +208,7 @@ class Graph {
                 inward_neighs[v].sort(); // VERY inefficient
             }*/
 
+            vertex_tree.update_node(u, -1); // Decrease outdegree by one
             edge_count--;
 
         }
@@ -193,7 +242,7 @@ class Graph {
                 unsigned int d_plus_x = INT_MAX;
                 node_t x = INT32_MAX;
                 for(auto neigh : outward_neighs[u]) {
-                    node_t w = neigh;
+                    node_t w = neigh.first;
                     if(d_plus(w) < d_plus_x) { // argmin (line 1 of Alg. 1)
                         x = w;
                         d_plus_x = d_plus(x);
@@ -213,7 +262,7 @@ class Graph {
                     }
 
                     for(auto& neigh : outward_neighs[u]) {
-                        update_incoming_neighs(neigh, u, 1); // Add 1 to d+(u) in every N-(neigh)
+                        update_incoming_neighs(neigh.first, u, 1); // Add 1 to d+(u) in every N-(neigh)
                     }
                 }
             }
@@ -226,7 +275,7 @@ class Graph {
                 }
 
                 for(auto& neigh : outward_neighs[u]) {
-                    update_incoming_neighs(neigh, u, 1); // Add 1 to d+(u) in every N-(neigh)
+                    update_incoming_neighs(neigh.first, u, 1); // Add 1 to d+(u) in every N-(neigh)
                 }
 
             }
@@ -238,7 +287,8 @@ class Graph {
         std::vector<std::vector<node_t>> buckets;
         Graph(size_t N_, double eta_, unsigned int b_) : 
                 N(N_), b(b_), eta(eta_), outward_neighs(N_),
-                d_pluses(N_), inward_neighs(N_), edge_count(0), buckets(std::log2(N_)  / .15 + 1)
+                d_pluses(N_), inward_neighs(N_), vertex_tree(N_), edge_count(0), 
+                buckets(std::log2(N_)  / .15 + 1)
         { }
 
         ~Graph() {
@@ -261,15 +311,31 @@ class Graph {
                         buckets[i].push_back(v);
                     }
                 }
+                // gamma = 0.05
                 if(i > 0 && (double) buckets[i].size() < (1.05)*(double)buckets[i-1].size()) { k = i-1; break; }
             }
 
             std::cout << "k è: " << k << std::endl;
+            double dens = 0;
             for(auto& v : buckets[k]) {
-                std::cout << v << " ";
+                std::cout << v << " (deg: " << (double)d_pluses[v]/b << ") ";
+                if((double)d_pluses[v]/b > dens) dens = (double)d_pluses[v]/b;
             }
-            std::cout << "(soglia: " << (double) maximal_outdegree / (double) std::pow((1. + (double)eta/b), k) << " )" << std::endl;
+            std::cout << std::endl << "Subgraph density: " << dens;
+            // std::cout << "(soglia: " << (double) maximal_outdegree / (double) std::pow((1. + (double)eta/b), k) << " )" << std::endl;
             std::cout << std::endl;
+
+            std::cout << "VERA Densità intrabucket: ";
+            double edges = 0.;
+            for(auto& v : buckets[k]) {
+                for(auto& neigh : outward_neighs[v]) {
+                    if(std::find(buckets[k].begin(), buckets[k].end(), neigh.first) != buckets[k].end()) {
+                        edges += neigh.second;
+                    }
+                }
+            }
+            std::cout << ((double) edges / (double) b) / (double) buckets[k].size()  << std::endl;
+            std::cout << "Dimensione: " << buckets[k].size() << std::endl;
             for(auto& b : buckets) b.clear(); 
 
         }
@@ -297,7 +363,7 @@ class Graph {
                 double edges = 0.;
                 for(auto& v : buckets[i]) {
                     for(auto& neigh : outward_neighs[v]) {
-                        if(std::find(buckets[i].begin(), buckets[i].end(), neigh) != buckets[i].end()) {
+                        if(std::find(buckets[i].begin(), buckets[i].end(), neigh.first) != buckets[i].end()) {
                             edges++;
                         }
                     }
@@ -331,12 +397,12 @@ class Graph {
             std::vector<std::vector<node_t>> rasterized(N);
             for(auto i=0;i<N;i++) { // Loop through the vertices
                 for(auto& neigh : outward_neighs[i]) {
-                    if(edges[i].empty() || edges[i].back().first != neigh) {
-                        edges[i].push_back(std::make_pair(neigh, 1));
-                    }
-                    else {
-                        edges[i].back().second++;
-                    }
+                    // if(edges[i].empty() || edges[i].back().first != neigh) {
+                    //     edges[i].push_back(std::make_pair(neigh, 1));
+                    // }
+                    // else {
+                    //     edges[i].back().second++;
+                    // }
                 }
                 // outward_neighs[i].clear();
             }
@@ -430,7 +496,7 @@ class Graph {
                 std::cout << "\t[" << i << " d+ = " << d_plus(i) << ", length=" << outward_neighs[i].size() << "]: ";
                 for(auto& neigh : outward_neighs[i]) {
                     //std::cout << "(" << neigh.first << ", b: " << neigh.second << ") ";
-                    std::cout << neigh << " ";
+                    std::cout << neigh.first << " ";
                 }
                 std::cout << std::endl;
             }
