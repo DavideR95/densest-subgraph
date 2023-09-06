@@ -35,9 +35,8 @@ struct parent_node_t {
 
 struct leaf_node_t {
     std::unordered_set<node_t> node_list; // For leaves only
-    size_t degree; // For leaves only
     
-    leaf_node_t(size_t deg) : node_list({}), degree(deg) {}
+    leaf_node_t() : node_list({}) {}
 };
 
 class tree_t {
@@ -45,19 +44,98 @@ class tree_t {
         std::vector<parent_node_t> internal_nodes;
         std::vector<leaf_node_t> leaves;
         std::vector<size_t> reverse_index;
+        size_t depth;
     public:
 
-        tree_t(size_t sz) : internal_nodes(sz-1), leaves(sz, 0), reverse_index(sz, 0) {
-            leaves[0].degree = 0;
+        tree_t(size_t sz) : internal_nodes(sz-1), reverse_index(sz, 0) {
+            sz--;
+            sz |= sz >> 1;
+            sz |= sz >> 2;
+            sz |= sz >> 4;
+            sz |= sz >> 8;
+            sz |= sz >> 16;
+            sz++; // Next power of 2
+            internal_nodes.resize(sz-1);
+            update_first_leaf(0);
+            leaves.resize(sz);
+            depth = std::log2(sz);
             for(node_t v=0;v<sz;v++) leaves[0].node_list.insert(v); // All nodes start with outdegree = 0
         }
 
-        void update_node(node_t who, size_t count=1) {
+        void update_first_leaf(size_t start=0) {
+            for(size_t i=start;i<internal_nodes.size();i++) {
+                internal_nodes[i].first_leaf = (left(i) < i) ? left(i) : i * std::pow(2, depth-std::log2(i)) - 1 - internal_nodes.size();
+            }
+        }
+
+        void update_node(node_t who, int count=1) {
+            //std::cout << "\tAggiungo " << count << " al nodo " << who;
             size_t bucket = reverse_index[who]; // Move who to the +count bucket
+            //std::cout << " che prima si trovava in posizione " << bucket << std::endl;
             leaves[bucket].node_list.erase(who);
             assert(bucket+count >= 0);
+            if(bucket + count >= leaves.size()) {
+                internal_nodes.resize((internal_nodes.size() + 1) * 2 - 1);
+                leaves.resize(leaves.size() * 2);
+                depth++;
+                update_first_leaf();
+            }
             leaves[bucket+count].node_list.insert(who);
+
+            
+
+            // Traverse the tree and fix the count
+            size_t curr = parent(bucket, true);
+            while(curr != 0) { // Ignores the root
+                internal_nodes[curr].node_count--;
+                curr = parent(curr);
+            }
+
+            curr = parent(bucket+count, true);
+            while(curr != 0) { // Ignores the root
+                internal_nodes[curr].node_count++;
+                curr = parent(curr);
+            }
+
+            // Counter of the root does not change (ever, because we do +1 and -1)
+
             reverse_index[who] = bucket+count;
+        }
+
+        size_t parent(size_t index, bool isLeaf=false) {
+            return (isLeaf) ? (index + internal_nodes.size() - 1) / 2 : (index-1) / 2;
+        }
+
+        size_t left(size_t index, bool isLeaf=false) {
+            if(2 * index + 1 >= internal_nodes.size()) { // It means we are the parent of a leaf
+                return (isLeaf) ? 0 : index * 2 + 1 - internal_nodes.size();
+            }
+            return (isLeaf) ? 0 : index * 2 + 1;
+        }
+
+        size_t right(size_t index, bool isLeaf=false) {
+            if(2 * index + 2 >= internal_nodes.size()) { // It means we are the parent of a leaf
+                return (isLeaf) ? 0 : index * 2 + 2 - internal_nodes.size();
+            }
+            return (isLeaf) ? 0 : index * 2 + 2;
+        }
+
+        size_t get_ti_size(size_t degree) {
+            size_t count = 0;
+            for(auto i=degree;i<leaves.size();i++) {
+                count += leaves[i].node_list.size();
+            }
+            // Ora che so chi è la first leaf di ogni nodo
+            // Devo cambiare questo algoritmo in modo da risalire l'albero
+            // E poi scansionare le foglie a partire dalla sua prima foglia
+            // E stampare i nodi che contengono le foglie
+            // Parto dalla foglia degree, prendo il padre, e risalgo
+            // Stavolta è più facile, l'unico check da fare è se la foglia
+            // è una foglia "destra" o no e ricordarselo
+            // Poi la foglia estremo dx è sempre inclusa, quindi facile anche lì
+            // Perché la foglia estremo dx è leaves.size()
+
+            return count;
         }
 };
 
@@ -150,6 +228,7 @@ class Graph {
 
         // Adds the edge (u, v)
         void append_edge(node_t u, node_t v) {
+            vertex_tree.update_node(u); // Adds +1 to the outdegree of 1
             for(auto& neigh : outward_neighs[u]) {
                 if(neigh.first == v) {
                     neigh.second++;
@@ -157,7 +236,7 @@ class Graph {
                 }
             }
             outward_neighs[u].push_back(std::make_pair(v, 1));
-            vertex_tree.update_node(u); // Adds +1 to the outdegree of 1
+            
             //outward_neighs[u].push_back(v);
             //std::sort(outward_neighs[u].begin(), outward_neighs[u].end());
         }
@@ -304,15 +383,18 @@ class Graph {
         void update_densest_subgraph(double epsilon=.5) { // eps' = eps/10, gamma = eps', eta > 1280, b = O(eps'^(-2)*eta*log n)
             size_t k = 0;
             std::cout << "Iterazioni: " << (int) (std::log2(size())/epsilon+1) << std::endl;
+            size_t count;
             for(auto i=0;i<(int) (std::log2(size())/epsilon+1);i++) {
                 double v_i = (double) maximal_outdegree / std::pow((1. + (double)eta/b), i);
-                for(auto v=0;v<size();v++) {
-                    if(d_pluses[v] > v_i) {
-                        buckets[i].push_back(v);
-                    }
-                }
+                // for(auto v=0;v<size();v++) {
+                //     if(d_pluses[v] > v_i) {
+                //         buckets[i].push_back(v);
+                //     }
+                // }
+                auto old_count = count;
+                count = vertex_tree.get_ti_size(v_i);
                 // gamma = 0.05
-                if(i > 0 && (double) buckets[i].size() < (1.05)*(double)buckets[i-1].size()) { k = i-1; break; }
+                if(i > 0 && (double) count < (1.05)*(double)old_count) { k = i-1; break; }
             }
 
             std::cout << "k è: " << k << std::endl;
