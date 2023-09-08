@@ -7,7 +7,7 @@
 #include <unordered_set>
 #include <limits.h>
 #include <cassert>
-
+#include <unistd.h>
 using node_t = uint32_t;
 
 struct bucket_t {
@@ -35,8 +35,11 @@ struct parent_node_t {
 
 struct leaf_node_t {
     std::unordered_set<node_t> node_list; // For leaves only
+    size_t prev, next;
     
-    leaf_node_t() : node_list({}) {}
+    leaf_node_t() : node_list({}), prev(INT_MAX), next(INT_MAX) {}
+
+    bool isEmpty() { return node_list.empty(); }
 };
 
 class tree_t {
@@ -45,9 +48,11 @@ class tree_t {
         std::vector<leaf_node_t> leaves;
         std::vector<size_t> reverse_index;
         size_t depth;
+        size_t maximum_leaf;
     public:
 
-        tree_t(size_t sz) : internal_nodes(sz-1), reverse_index(sz, 0) {
+        tree_t(size_t sz) : internal_nodes(sz-1), reverse_index(sz, 0), maximum_leaf(0) {
+            auto number_of_nodes = sz;
             sz--;
             sz |= sz >> 1;
             sz |= sz >> 2;
@@ -58,8 +63,8 @@ class tree_t {
             internal_nodes.resize(sz-1);
             update_first_leaf(0);
             leaves.resize(sz);
-            depth = std::log2(sz);
-            for(node_t v=0;v<sz;v++) leaves[0].node_list.insert(v); // All nodes start with outdegree = 0
+            depth = std::log2(sz);   
+            for(node_t v=0;v<number_of_nodes;v++) leaves[0].node_list.insert(v); // All nodes start with outdegree = 0
         }
 
         void update_first_leaf(size_t start=0) {
@@ -73,14 +78,32 @@ class tree_t {
             size_t bucket = reverse_index[who]; // Move who to the +count bucket
             //std::cout << " che prima si trovava in posizione " << bucket << std::endl;
             leaves[bucket].node_list.erase(who);
-            assert(bucket+count >= 0);
+            if(bucket == 1047) {
+                std::cout << "!!!";
+            }
             if(bucket + count >= leaves.size()) {
                 internal_nodes.resize((internal_nodes.size() + 1) * 2 - 1);
                 leaves.resize(leaves.size() * 2);
                 depth++;
                 update_first_leaf();
             }
+            // STO ASSUMENDO CHE BUCKET+COUNT SIA SEMPRE MAGGIORE DI BUCKET, MA NON È VERO
             leaves[bucket+count].node_list.insert(who);
+            if(leaves[bucket].isEmpty()) { // If now this leaf becomes empty, skip it in the list
+                if(leaves[bucket].prev < INT_MAX) {
+                    leaves[leaves[bucket].prev].next = bucket+count;
+                }
+                if(leaves[bucket].next < INT_MAX) {
+                    leaves[leaves[bucket].next].prev = leaves[bucket].prev;
+                }
+            }
+            if(leaves[bucket+count].prev >= leaves.size()) {
+                leaves[bucket+count].prev = (leaves[bucket].isEmpty()) ? leaves[bucket].prev : bucket;
+            }
+            if(leaves[bucket].next >= leaves.size()) {
+                leaves[bucket].next = (leaves[bucket].isEmpty()) ? INT_MAX : bucket+count;
+            }
+            if(bucket+count > maximum_leaf) maximum_leaf = bucket+count;
 
             
 
@@ -120,11 +143,20 @@ class tree_t {
             return (isLeaf) ? 0 : index * 2 + 2;
         }
 
+        std::pair<size_t, size_t> tree_leaves(size_t tree_node) {
+            int layer = std::log2(tree_node+1);
+
+            size_t leaves_start = (tree_node + 1) * (1 << (depth-layer)) - 1; // n * (2^(depth-layer(n))) - 1
+            size_t leaves_end = (tree_node + 2) * (1 << (depth-layer)) - 2; // (n+1) * (2^(depth-layer(n))) - 2
+
+            return std::make_pair(leaves_start - internal_nodes.size(), leaves_end - internal_nodes.size());
+        }
+
         size_t get_ti_size(size_t degree) {
             size_t count = 0;
-            for(auto i=degree;i<leaves.size();i++) {
-                count += leaves[i].node_list.size();
-            }
+            // for(auto i=degree;i<leaves.size();i++) {
+            //     count += leaves[i].node_list.size();
+            // }
             // Ora che so chi è la first leaf di ogni nodo
             // Devo cambiare questo algoritmo in modo da risalire l'albero
             // E poi scansionare le foglie a partire dalla sua prima foglia
@@ -134,6 +166,65 @@ class tree_t {
             // è una foglia "destra" o no e ricordarselo
             // Poi la foglia estremo dx è sempre inclusa, quindi facile anche lì
             // Perché la foglia estremo dx è leaves.size()
+
+            //auto savage = count;
+            //count = 0;
+
+            std::vector<size_t> result;
+
+
+            // Align start and end to the actualy nodes in the heap
+            auto start = degree;
+            auto end = (maximum_leaf % 2 == 0) ? std::min(maximum_leaf + 1, leaves.size() - 1) : maximum_leaf;
+            size_t a = start, b = end; // start, end will be modified in the loops
+            if(a == b) return leaves[a].node_list.size();
+
+            if(a % 2 != 0) {
+                count += leaves[a].node_list.size();
+                a++;
+                start++;
+            }
+
+            size_t curr;
+
+            while(start <= end) {
+                std::pair<size_t, size_t> my_leaves;
+                curr = start;
+                bool isLeaf = true;
+                while(true) {
+                    if(curr == 0) break;
+                    my_leaves = tree_leaves(parent(curr, isLeaf));
+                    if(my_leaves.first < a || my_leaves.second > b)
+                        break;
+
+                    curr = parent(curr, isLeaf);
+                    isLeaf = false; 
+                    
+                }
+                my_leaves = tree_leaves(curr);
+                result.push_back(curr);
+                if(start < my_leaves.first) {
+                    end = std::min(end, my_leaves.first);
+                }
+                else if(start == my_leaves.first && end >= my_leaves.second) { start = my_leaves.second + 1; }
+                if(end > my_leaves.second) { start = std::max(start, my_leaves.second); }
+                else if(end == my_leaves.second && start <= my_leaves.first) { end = my_leaves.first + 1; }
+            }
+
+
+            for(auto& index : result) {
+                count += internal_nodes[index].node_count;
+            }
+
+            //assert(savage == count);
+            size_t i = degree;
+            while(i<leaves.size()) {
+                for(auto& elem : leaves[i].node_list) {
+                    std::cout << elem << " ";
+                }
+                i = leaves[i].next;
+            }
+            std::cout << std::endl;
 
             return count;
         }

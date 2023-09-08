@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := main
 
 CXX = icpx
-CXXFLAGS = -Wall -pedantic -std=c++17 -g -O3
+CXXFLAGS = -Wall -pedantic -std=c++17 -g -O0
 LDFLAGS =
 
 all: clean main 
